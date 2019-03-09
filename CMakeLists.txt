@@ -3,13 +3,7 @@ project(CpuProfiler)
 include (CheckIncludeFile)
 file(READ "VERSION.txt" VERSION)
 
-option(NONAMESPACE "Don't use namespace in the header" off)
-
 string(TIMESTAMP COMPILE_DATETIME "%Y/%m/%d %H:%M:%S")
-
-if(NONAMESPACE)
-  add_definitions("-DDONT_USE_NAMESPACE=1")
-endif(NONAMESPACE)
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
   add_definitions("-DCIOSDEBUG=1")
@@ -34,9 +28,6 @@ endif()
 
 # using Visual Studio C++
 if(MSVC)
-  # message( ${CMAKE_CXX_COMPILER} )
-  add_definitions("/wd4819")
-  add_definitions("/nologo")
   if("${CMAKE_SIZEOF_VOID_P}" STREQUAL "8")
     set(TARGET_ARCH x64)
     add_definitions("-DCIOS_X64=1")
@@ -46,37 +37,46 @@ if(MSVC)
   endif()
 endif(MSVC)
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(UUIDS REQUIRED UUIDs)
+pkg_check_modules(STARDATE REQUIRED libstardate)
+pkg_check_modules(PARALLEL REQUIRED libparallel)
+
 include_directories(include)
-include_directories(SRCs/Windows)
+include_directories(srcs)
 
-set(HEADERS include/UUIDs.hpp SRCs/Windows/PrivateUUIDs.hpp)
+set(HEADERS include/CpuProfiler.hpp)
+include_directories (${UUIDS_INCLUDE_DIRS})
+include_directories (${STARDATE_INCLUDE_DIRS})
+include_directories (${PARALLEL_INCLUDE_DIRS})
+link_directories(${UUIDS_LIBRARY_DIRS})
+link_directories(${STARDATE_LIBRARY_DIRS})
+link_directories(${PARALLEL_LIBRARY_DIRS})
 
-set(CORES
-  SRCs/UUIDs.cpp
-  SRCs/nDestroyer.cpp
-  SRCs/nEnabler.cpp
-  SRCs/Convoy.cpp
-  SRCs/Windows/PrivateConvoy.cpp
-  SRCs/Windows/PrivateEnabler.cpp)
-
-# Handling pkg-config file
-configure_file(UUIDs.pc.in UUIDs.pc @ONLY)
+set(CORES srcs/CpuProfiler.cpp)
 
 if(BUILD_SHARED_LIBS)
-  add_library(UUIDs SHARED ${CORES} ${HEADERS})
-  target_link_libraries(UUIDs PUBLIC kernel32)
+  add_executable(CpuProfiler ${CORES} ${HEADERS})
+  target_link_libraries(CpuProfiler PUBLIC kernel32)
+  target_link_libraries(CpuProfiler PUBLIC Psapi)
+  target_link_libraries(CpuProfiler PUBLIC ${UUIDS_LIBRARIES})
+  target_link_libraries(CpuProfiler PUBLIC ${STARDATE_LIBRARIES})
+  target_link_libraries(CpuProfiler PUBLIC ${PARALLEL_LIBRARIES})
+  target_compile_options(CpuProfiler PUBLIC ${UUIDS_CFLAGS_OTHER})
+  target_compile_options(CpuProfiler PUBLIC ${STARDATE_CFLAGS_OTHER})
+  target_compile_options(CpuProfiler PUBLIC ${PARALLEL_CFLAGS_OTHER})
   add_definitions("-DBUILD_SHARED_LIBS=1")
   add_definitions("-DEXPORT_UUIDS=1")
-  install(TARGETS UUIDs
-    RUNTIME DESTINATION bin
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib)
-  install(FILES include/UUIDs.hpp DESTINATION include)
-  install(FILES ${CMAKE_BINARY_DIR}/UUIDs.pc DESTINATION lib/packages)
+  install(TARGETS CpuProfiler RUNTIME DESTINATION bin)
 else(BUILD_SHARED_LIBS)
-  add_library(UUIDs STATIC ${CORES} ${HEADERS})
-  target_link_libraries(UUIDs PUBLIC kernel32)
-  install(TARGETS UUIDs DESTINATION lib)
-  install(FILES include/UUIDs.hpp DESTINATION include)
-  install(FILES ${CMAKE_BINARY_DIR}/UUIDs.pc DESTINATION lib/packages)
+  add_executable(CpuProfiler ${CORES} ${HEADERS})
+  target_link_libraries(CpuProfiler PUBLIC kernel32)
+  target_link_libraries(CpuProfiler PUBLIC Psapi)
+  target_link_libraries(CpuProfiler PUBLIC ${UUIDS_LIBRARIES})
+  target_link_libraries(CpuProfiler PUBLIC ${STARDATE_LIBRARIES})
+  target_link_libraries(CpuProfiler PUBLIC ${PARALLEL_LIBRARIES})
+  target_compile_options(CpuProfiler PUBLIC ${UUIDS_CFLAGS_OTHER})
+  target_compile_options(CpuProfiler PUBLIC ${STARDATE_CFLAGS_OTHER})
+  target_compile_options(CpuProfiler PUBLIC ${PARALLEL_CFLAGS_OTHER})
+  install(TARGETS CpuProfiler RUNTIME DESTINATION bin)
 endif(BUILD_SHARED_LIBS)

@@ -10,7 +10,6 @@ CONFIG      -= app_bundle
 CONFIG      += link_pkgconfig
 
 PKGCONFIG   += UUIDs
-PKGCONFIG   += libnations
 PKGCONFIG   += libstardate
 PKGCONFIG   += libparallel
 
@@ -30,4 +29,4 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 OTHER_FILES += $${PWD}/CMakeLists.txt
 OTHER_FILES += $${PWD}/VERSION.txt
 
-OTHER_FILES   += $${PWD}/resources/CpuProfiler.rc
+OTHER_FILES += $${PWD}/resources/CpuProfiler.rc
