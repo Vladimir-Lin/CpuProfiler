@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
-project(UUIDs)
+project(CpuProfiler)
 include (CheckIncludeFile)
 file(READ "VERSION.txt" VERSION)
 
