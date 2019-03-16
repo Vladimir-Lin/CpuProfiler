@@ -24,10 +24,14 @@ typedef struct     {
   int64_t Stamp    ;
 } CpuTag           ;
 
-typedef struct     {
-  bool    Continue ;
-  int64_t ustamp   ;
-} MonitorDetails   ;
+typedef struct             {
+  bool    Continue         ;
+  int64_t ustamp           ;
+  int32_t Block            ;
+  int64_t Count            ;
+  int32_t MemoryPercentage ;
+  int32_t Period           ;
+} MonitorDetails           ;
 
 #pragma pack(pop)
 
@@ -51,21 +55,26 @@ class CpuProfiler : public Thread
     int              MaxTags        ;
     std::string      TempDir        ;
 
-    explicit     CpuProfiler (void) ;
-    virtual     ~CpuProfiler (void) ;
+    explicit     CpuProfiler   (void) ;
+    virtual     ~CpuProfiler   (void) ;
 
-    bool         Create      (int recordTime) ;
+    bool         Create        (int recordTime) ;
+    bool         Open          (void) ;
+    bool         TryOpen       (void) ;
 
   protected:
 
-    virtual void run         (int Type,CIOS::ThreadData * data) ;
+    virtual void run           (int Type,CIOS::ThreadData * data) ;
 
-    void         CpuLookup   (ThreadData * data) ;
-    void         RecordCpu   (ThreadData * data) ;
+    void         CpuLookup     (ThreadData * data) ;
+    void         RecordCpu     (ThreadData * data) ;
 
-    bool         Save        (int64_t total,CpuTag * cpu) ;
+    bool         Save          (int64_t total,CpuTag * cpu) ;
 
   private:
+
+    void         PrepareMemory (void) ;
+    void         Initialize    (int recordTime) ;
 
 } ;
 

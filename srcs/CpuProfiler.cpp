@@ -29,17 +29,18 @@ CpuProfiler::~CpuProfiler (void)
   T2  = nullptr                      ;
 }
 
-bool CpuProfiler::Create(int recordTime)
+void CpuProfiler::PrepareMemory(void)
+{
+  char * p = SHM . Memory ( )                                   ;
+  details = (CpuDetails     *) ( p                            ) ;
+  monitor = (MonitorDetails *) ( p + sizeof(CpuDetails) - 768 ) ;
+  process = (ProcessDetails *) ( p + sizeof(CpuDetails)       ) ;
+}
+
+void CpuProfiler::Initialize(int recordTime)
 {
   int64_t total = sizeof(CIOS::CpuDetails) + sizeof(CIOS::ProcessDetails) ;
-  if ( ! SHM . Create ( "CpuProfiler" , total ) ) return false            ;
-  if ( ! SHM . isCreated  ( )                   ) return false            ;
-  if ( ! SHM . isAttached ( )                   ) return false            ;
-  /////////////////////////////////////////////////////////////////////////
-  char * p = SHM . Memory ( )                                             ;
-  details = (CpuDetails     *) ( p                            )           ;
-  monitor = (MonitorDetails *) ( p + sizeof(CpuDetails) - 768 )           ;
-  process = (ProcessDetails *) ( p + sizeof(CpuDetails)       )           ;
+  char  * p     = SHM . Memory ( )                                        ;
   /////////////////////////////////////////////////////////////////////////
   ::memset ( p , 0 , (size_t) total )                                     ;
   strcpy_s ( details -> Name        , 224 , "CpuProfiler" )               ;
@@ -56,10 +57,40 @@ bool CpuProfiler::Create(int recordTime)
   TAG      [ 0 ] = T1                                                     ;
   TAG      [ 1 ] = T2                                                     ;
   RecordingTime  = recordTime * 1000000LL                                 ;
+  monitor -> Period = recordTime                                          ;
+}
+
+bool CpuProfiler::TryOpen(void)
+{
+  int64_t total = sizeof(CIOS::CpuDetails) + sizeof(CIOS::ProcessDetails) ;
+  if ( ! SHM . Open ( "CpuProfiler" , total ) ) return false              ;
+  SHM . Close ( )                                                         ;
+  return true                                                             ;
+}
+
+bool CpuProfiler::Create(int recordTime)
+{
+  int64_t total = sizeof(CIOS::CpuDetails) + sizeof(CIOS::ProcessDetails) ;
+  if ( ! SHM . Create ( "CpuProfiler" , total ) ) return false            ;
+  if ( ! SHM . isCreated  ( )                   ) return false            ;
+  if ( ! SHM . isAttached ( )                   ) return false            ;
   /////////////////////////////////////////////////////////////////////////
-  CPU . Tell     ( details )                                              ;
-  CPU . Tell     ( process )                                              ;
-  CPU . GetUsage ( true    )                                              ;
+  PrepareMemory  (            )                                           ;
+  Initialize     ( recordTime )                                           ;
+  /////////////////////////////////////////////////////////////////////////
+  CPU . Tell     ( details    )                                           ;
+  CPU . Tell     ( process    )                                           ;
+  CPU . GetUsage ( true       )                                           ;
+  /////////////////////////////////////////////////////////////////////////
+  return true                                                             ;
+}
+
+bool CpuProfiler::Open(void)
+{
+  int64_t total = sizeof(CIOS::CpuDetails) + sizeof(CIOS::ProcessDetails) ;
+  if ( ! SHM . Open ( "CpuProfiler" , total ) ) return false              ;
+  /////////////////////////////////////////////////////////////////////////
+  PrepareMemory  (            )                                           ;
   /////////////////////////////////////////////////////////////////////////
   return true                                                             ;
 }
@@ -94,11 +125,13 @@ void CpuProfiler::CpuLookup(ThreadData * d)
     msleep ( 500 )                                                           ;
     //////////////////////////////////////////////////////////////////////////
     CPU . Tell ( process )                                                   ;
-    process -> machine = CPU  . GetUsage  ( true )                           ;
+    process -> machine = CPU . GetUsage   ( true )                           ;
     monitor -> ustamp  = StarDate::ustamp (      )                           ;
     //////////////////////////////////////////////////////////////////////////
     v   = process -> total - process -> available                            ;
     x   = (int32_t) ( ( v * 10000 ) / process -> total )                     ;
+    //////////////////////////////////////////////////////////////////////////
+    monitor -> MemoryPercentage = x                                          ;
     //////////////////////////////////////////////////////////////////////////
     tag  = & ( TAG [ TagId ] [ Totals [ TagId ] ] )                          ;
     tag -> CPU    = process -> machine                                       ;
@@ -106,6 +139,7 @@ void CpuProfiler::CpuLookup(ThreadData * d)
     tag -> Stamp  = monitor -> ustamp                                        ;
     //////////////////////////////////////////////////////////////////////////
     Totals [ TagId ] ++                                                      ;
+    monitor -> Count = Totals [ TagId ]                                      ;
     v    = monitor -> ustamp - StartTime                                     ;
     if ( ( v > RecordingTime ) || ( Totals [ TagId ] >= MaxTags ) )          {
       Overflow [ TagId ] = 1                                                 ;
@@ -113,7 +147,7 @@ void CpuProfiler::CpuLookup(ThreadData * d)
       Totals   [ TagId ] = 0                                                 ;
       Overflow [ TagId ] = 0                                                 ;
       StartTime          = monitor -> ustamp                                 ;
-            printf("Switch to %d\n",TagId) ;
+      monitor -> Block   = TagId                                             ;
     }                                                                        ;
     //////////////////////////////////////////////////////////////////////////
   }                                                                          ;
@@ -237,18 +271,30 @@ void CpuSignal(int no)
 int main(int argc,char * argv [])
 {
   ////////////////////////////////////////////////////////////////////////////
-  char * CPUPROFILER = getenv ( "CPUPROFILER" )                              ;
-  char * CPUINTERVAL = getenv ( "CPUINTERVAL" )                              ;
-  char * TEMP        = getenv ( "TEMP"        )                              ;
-  char * TMP         = getenv ( "TMP"         )                              ;
+  char   CPUPROFILER [ 1024 ]                                                ;
+  char   CPUINTERVAL [ 1024 ]                                                ;
+  char   TEMP        [ 1024 ]                                                ;
+  char   TMP         [ 1024 ]                                                ;
+  size_t bufferSize = 0                                                      ;
+  ////////////////////////////////////////////////////////////////////////////
+  ::memset   ( CPUPROFILER , 0 , 1024                                      ) ;
+  ::memset   ( CPUINTERVAL , 0 , 1024                                      ) ;
+  ::memset   ( TEMP        , 0 , 1024                                      ) ;
+  ::memset   ( TMP         , 0 , 1024                                      ) ;
+  ////////////////////////////////////////////////////////////////////////////
+  ::getenv_s ( &bufferSize , CPUPROFILER , 1024 , "CPUPROFILER"            ) ;
+  ::getenv_s ( &bufferSize , CPUINTERVAL , 1024 , "CPUINTERVAL"            ) ;
+  ::getenv_s ( &bufferSize , TEMP        , 1024 , "TEMP"                   ) ;
+  ::getenv_s ( &bufferSize , TMP         , 1024 , "TMP"                    ) ;
   ////////////////////////////////////////////////////////////////////////////
   std::string temp                                                           ;
   int         recordTime = 3600                                              ;
-  if ( nullptr != TMP         ) temp       = TMP                             ;
-  if ( nullptr != TEMP        ) temp       = TEMP                            ;
-  if ( nullptr != CPUPROFILER ) temp       = CPUPROFILER                     ;
-  if ( nullptr != CPUINTERVAL ) recordTime = atoi ( CPUINTERVAL )            ;
+  if ( strlen ( TMP         ) > 0 ) temp       = TMP                         ;
+  if ( strlen ( TEMP        ) > 0 ) temp       = TEMP                        ;
+  if ( strlen ( CPUPROFILER ) > 0 ) temp       = CPUPROFILER                 ;
+  if ( strlen ( CPUINTERVAL ) > 0 ) recordTime = atoi ( CPUINTERVAL )        ;
   ////////////////////////////////////////////////////////////////////////////
+  CIOS::CpuProfiler profiler                                                 ;
   int    argi        = 1                                                     ;
   while ( argi < argc )                                                      {
     if ( 0 == strcmp ( argv [ argi ] , "--interval" ) )                      {
@@ -258,8 +304,138 @@ int main(int argc,char * argv [])
     } else
     if ( 0 == strcmp ( argv [ argi ] , "--dir" ) )                           {
       argi++                                                                 ;
-      temp = strdup  ( argv [ argi ] )                                       ;
+      temp = std::string ( argv [ argi ] )                                   ;
       argi++                                                                 ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "/start" ) )                          {
+      argi++                                                                 ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--stop" ) )                          {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        profiler . monitor -> Continue = false                               ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "/stop" ) )                           {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        profiler . monitor -> Continue = false                               ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--cpu" ) )                           {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%d" , profiler . process -> machine )                      ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--timestamp" ) )                     {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%lld" , profiler . process -> timestamp )                  ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--rdtsc" ) )                         {
+      argi++                                                                 ;
+      printf ( "%lld" , CIOS::StarDate::RDTSC ( ) )                          ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--cache-line-size" ) )               {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%lld" , profiler . details -> Cache )                      ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--record" ) )                        {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%d" , profiler . monitor -> Period )                       ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--memory-percentage" ) )             {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%d" , profiler . monitor -> MemoryPercentage )             ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--memory-total" ) )                  {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%lld" , profiler . process -> total )                      ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--memory-available" ) )              {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%lld" , profiler . process -> available )                  ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--memory-used" ) )                   {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%lld"                                                      ,
+                 profiler . process -> total                                 -
+                 profiler . process -> available                           ) ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--memory-virtual-total" ) )          {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%lld" , profiler . process -> virtualTotal )               ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--memory-virtual-available" ) )      {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%lld" , profiler . process -> virtualAvailable )           ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--block" ) )                         {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%d" , profiler . monitor -> Block )                        ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--count" ) )                         {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%lld" , profiler . monitor -> Count )                      ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
+    } else
+    if ( 0 == strcmp ( argv [ argi ] , "--processors" ) )                    {
+      argi++                                                                 ;
+      if ( profiler . Open ( ) )                                             {
+        printf ( "%d" , profiler . details -> Processors )                   ;
+        profiler . SHM . Close ( )                                           ;
+      }                                                                      ;
+      return 0                                                               ;
     } else {                                                                 ;
       argi++                                                                 ;
     }                                                                        ;
@@ -269,17 +445,25 @@ int main(int argc,char * argv [])
   signal ( SIGINT  , CpuSignal ) ; // CTRL+C signal
   signal ( SIGTERM , CpuSignal ) ; // Termination request
   ////////////////////////////////////////////////////////////////////////////
-  CIOS::CpuProfiler profiler                                                 ;
   profiler . TempDir = temp                                                  ;
-  profiler . Create ( recordTime )                                           ;
-  Continue = & ( profiler . monitor -> Continue ) ;
-  *Continue = true ;
-  profiler . Controller = Continue ;
-  profiler . start  ( 1001 ) ;
-  profiler . start  ( 1002 ) ;
-  while ( *Continue ) {
-    CIOS::StarDate::sleep(1) ;
+  ////////////////////////////////////////////////////////////////////////////
+  if ( profiler . TryOpen ( ) ) {
+    printf ( "Shared Memory already exists\n" ) ;
+    return 1 ;
   }
+  ////////////////////////////////////////////////////////////////////////////
+  if ( profiler . Create ( recordTime ) )                                    {
+    Continue = & ( profiler . monitor -> Continue ) ;
+    *Continue = true ;
+    profiler . Controller = Continue ;
+    profiler . start  ( 1001 ) ;
+    profiler . start  ( 1002 ) ;
+    while ( *Continue ) {
+      CIOS::StarDate::sleep(1) ;
+    }
+  } else                                                                     {
+      printf ( "Shared Memory can not be created.\n" ) ;
+  }                                                                          ;
   ////////////////////////////////////////////////////////////////////////////
   return 0                                                                   ;
 }
